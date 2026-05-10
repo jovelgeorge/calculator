@@ -1,6 +1,6 @@
 # devig & EV calculator
 
-open-source discord bot that calculates no-vig and expected value (EV) for sports betting odds/wagers.
+an open-source discord bot that calculates expected value (EV) and Kelly for betting odds after accounting for the vig.
 
 ## setup
 

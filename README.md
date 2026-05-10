@@ -1,6 +1,6 @@
-# devig & EV calculator
+# devig EV calculator
 
-an open-source discord bot that calculates expected value (EV) and Kelly for betting odds after accounting for the vig.
+an open-source discord bot that calculates expected value (EV) and Kelly% for betting odds after removing the vig.
 
 ## setup
 
@@ -20,22 +20,24 @@ DISCORD_BOT_TOKEN=your_token_here
 
 Type `/ev` and it will show you a list of parameters 
 
-*odds* — Enter the market odds
+*bet_odds* — Enter the market odds
+*leg_odds* — Enter the two-way leg odds or fair odds value
+
 - For two-way markets: `-130/110`
 - For multiple legs: `-130/110, -125/115`
 - For market averages: `avg(-130, -145)/avg(110,115)`
-
-*bet_odds* — The odds for the bet
-*fair_odds* — For when you already have the fair value
+- For implied holds: `250/8%`
 
 Type `/settings` and it will show you a list of personal settings
 
 *toggle_bankroll* — Enable or disable bankroll calculations.
 *bankroll* — Set bankroll amount
 *kelly* — Set Kelly Criterion type: `HK`, `QK`, `EK`
-*devig_type* — Set devig method: `wc` (default), `pb` (probit)
+*devig_type* — Set devig method: `wc` (default), `pb` (probit), `tko` (TKO), `goto` (goto_conversion)
 
-The calculator can also be toggled without the command tree for quick calculations using the syntax: `bet_odds:fair_odds`
+The calculator can also be toggled without the command tree for quick inline calculations using the syntax: `bet_odds:fair_odds` in any message.
 
+- For calculating to a two-way market: `100:-135/125`
 - For calculating to fair: `100:-130`
-- For calculating parlays: `105:-130,-132`
+- For calculating parlays: `500:-130,-130,-130`
+

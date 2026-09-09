@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from decimal import Decimal, ROUND_CEILING
@@ -79,6 +82,19 @@ class CalculationTests(unittest.TestCase):
         result = parse_message('300:100,200')
         self.assertEqual(result.probability, Fraction(1, 6))
 
+    def test_generated_legacy_colon_expressions_remain_parseable(self):
+        odds = [-500, -250, -110, 100, 134, 200, 500]
+        for offered in odds:
+            for fair in odds:
+                with self.subTest(offered=offered, fair=fair):
+                    self.assertIsNotNone(parse_message(f'{offered}:{fair}'))
+            for first in odds:
+                for second in odds:
+                    with self.subTest(offered=offered, first=first, second=second):
+                        self.assertIsNotNone(
+                            parse_message(f'{offered}:{first}/{second}')
+                        )
+
     def test_silent_rejections(self):
         for text in ['', 'hello 47c', '47c please', '100', 'avg(100)', '40c:',
                      ':134', '40c:134:100', '0c', '100c', '97.401c', '.5c',
@@ -133,6 +149,58 @@ class SettingsTests(unittest.TestCase):
 
 
 class DiscordTests(unittest.IsolatedAsyncioTestCase):
+    def make_message(self, content, *, permissions=None):
+        permissions = permissions or SimpleNamespace(
+            send_messages=True,
+            embed_links=True,
+            read_message_history=True,
+        )
+        return SimpleNamespace(
+            author=SimpleNamespace(bot=False, id=1),
+            webhook_id=None,
+            content=content,
+            guild=SimpleNamespace(me=object()),
+            reply=AsyncMock(),
+            channel=SimpleNamespace(
+                permissions_for=lambda _: permissions,
+                send=AsyncMock(),
+            ),
+        )
+
+    async def test_every_chat_family_reaches_discord_reply(self):
+        expected_text = {
+            '-250/180': ['67.94%', '-212', '+212'],
+            '-198:-250/180': ['2.25%', '1.12%', '-198'],
+            '-130/4%': ['54.44%', '-120', 'Opposite estimated'],
+            '47c': ['Kalshi: 47¢', '+113', '+105', '$1.75'],
+            '40c:134': ['6.84%', '2.53%', '$1.68'],
+            '300:-250/180,-130/4%,120': ['Leg 1', 'Leg 2', 'Leg 3', 'Independent legs'],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            store = SettingsStore(Path(directory) / 'settings.json')
+            for content, fragments in expected_text.items():
+                with self.subTest(content=content):
+                    message = self.make_message(content)
+                    await handle_message(message, store)
+                    message.reply.assert_awaited_once()
+                    embed = message.reply.call_args.kwargs['embed']
+                    rendered = str(embed.to_dict())
+                    for fragment in fragments:
+                        self.assertIn(fragment, rendered)
+                    self.assertFalse(message.reply.call_args.kwargs['mention_author'])
+                    self.assertEqual(
+                        message.reply.call_args.kwargs['allowed_mentions'].to_dict(),
+                        {'parse': []},
+                    )
+
+    async def test_bot_event_routes_chat_to_handler(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = create_bot(SettingsStore(Path(directory) / 'settings.json'))
+            message = self.make_message('-250/180')
+            await bot.on_message(message)
+            message.reply.assert_awaited_once()
+            await bot.close()
+
     async def test_reply_fallback_and_silence(self):
         with tempfile.TemporaryDirectory() as directory:
             store = SettingsStore(Path(directory) / 'settings.json')
@@ -153,6 +221,25 @@ class DiscordTests(unittest.IsolatedAsyncioTestCase):
             message.author.bot = True
             await handle_message(message, store)
             message.channel.send.assert_awaited_once()
+
+    async def test_missing_permissions_and_webhooks_are_silent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SettingsStore(Path(directory) / 'settings.json')
+            permissions = SimpleNamespace(
+                send_messages=True,
+                embed_links=False,
+                read_message_history=True,
+            )
+            message = self.make_message('47c', permissions=permissions)
+            await handle_message(message, store)
+            message.reply.assert_not_awaited()
+            message.channel.send.assert_not_awaited()
+
+            permissions.embed_links = True
+            message.webhook_id = 123
+            await handle_message(message, store)
+            message.reply.assert_not_awaited()
+            message.channel.send.assert_not_awaited()
 
     async def test_thread_permission_and_failed_send(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -177,6 +264,82 @@ class DiscordTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([command.name for command in bot.tree.get_commands()], ['settings'])
             self.assertNotIn('devig_method', [p.name for p in bot.tree.get_commands()[0].parameters])
             await bot.close()
+
+    async def test_settings_command_reads_and_updates_preferences(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'settings.json'
+            store = SettingsStore(path)
+            bot = create_bot(store)
+            command = bot.tree.get_command('settings')
+            interaction = SimpleNamespace(
+                user=SimpleNamespace(id=42),
+                response=SimpleNamespace(defer=AsyncMock()),
+                followup=SimpleNamespace(send=AsyncMock()),
+            )
+
+            await command.callback(
+                interaction,
+                bankroll=500.25,
+                toggle_bankroll=False,
+                kelly='HK',
+            )
+            interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+            sent = interaction.followup.send.call_args
+            self.assertIn('Bankroll: $500.25', sent.args[0])
+            self.assertIn('Wager amounts: Disabled', sent.args[0])
+            self.assertIn('Kelly: HK', sent.args[0])
+            self.assertTrue(sent.kwargs['ephemeral'])
+            self.assertEqual(SettingsStore(path).get('42').kelly, 'HK')
+
+            interaction.response.defer.reset_mock()
+            interaction.followup.send.reset_mock()
+            await command.callback(interaction)
+            self.assertIn('$500.25', interaction.followup.send.call_args.args[0])
+            await bot.close()
+
+    async def test_startup_hooks_sync_settings_and_restore_custom_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = create_bot(SettingsStore(Path(directory) / 'settings.json'))
+            with patch.object(bot.tree, 'sync', new=AsyncMock()) as sync:
+                await bot.setup_hook()
+                sync.assert_awaited_once_with()
+            with patch.object(bot, 'change_presence', new=AsyncMock()) as change_presence:
+                await bot.on_ready()
+                activity = change_presence.call_args.kwargs['activity']
+                self.assertEqual(activity.name, 'powered by JOVEL')
+                self.assertEqual(activity.type, discord.ActivityType.custom)
+            await bot.close()
+
+
+class StartupTests(unittest.TestCase):
+    def test_discord_file_runs_directly_despite_library_name_collision(self):
+        environment = os.environ.copy()
+        environment.pop('DISCORD_BOT_TOKEN', None)
+        result = subprocess.run(
+            [sys.executable, 'discord.py'],
+            cwd=Path(__file__).resolve().parents[1],
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr.strip(), 'DISCORD_BOT_TOKEN is required')
+
+    def test_main_constructs_worker_without_connecting_during_test(self):
+        worker = SimpleNamespace(run=Mock())
+        store = object()
+        with (patch.dict(os.environ, {'DISCORD_BOT_TOKEN': 'test-token'}, clear=True),
+              patch('calculator_discord.load_dotenv'),
+              patch('calculator_discord.SettingsStore', return_value=store),
+              patch('calculator_discord.create_bot', return_value=worker)):
+            app.main()
+        worker.run.assert_called_once_with('test-token')
+
+    def test_main_requires_token(self):
+        with (patch.dict(os.environ, {}, clear=True),
+              patch('calculator_discord.load_dotenv')):
+            with self.assertRaisesRegex(SystemExit, 'DISCORD_BOT_TOKEN is required'):
+                app.main()
 
 
 if __name__ == '__main__':

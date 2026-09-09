@@ -281,7 +281,12 @@ class CalculatorBot(commands.Bot):
 
     async def on_ready(self) -> None:
         logger.info("Calculator connected as %s", self.user)
-        await self.change_presence(activity=discord.Game(name="powered by JOVEL"))
+        await self.change_presence(
+            activity=discord.Activity(
+                name="powered by JOVEL",
+                type=discord.ActivityType.custom,
+            )
+        )
 
     async def on_message(self, message: discord.Message) -> None:
         try:

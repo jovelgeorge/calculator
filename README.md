@@ -2,6 +2,14 @@
 
 Discord worker for two-outcome probit devigging, independent parlays, expected value, Kelly sizing, and prediction-market prices. Calculations use complete chat messages. `/settings` manages preferences; `/ev` and devig-method selection have been removed.
 
+## Code layout
+
+- `calculator.py`: parsing and all calculation logic, including prediction-market fees.
+- `discord.py`: Discord responses, formatting, preferences, and startup.
+- `test/test_calculator.py`: offline tests.
+
+Run `discord.py` as a script. Its small import bootstrap resolves the installed Discord library despite the shared name; application tests load this file as `calculator_discord`.
+
 ## Inputs
 
 | Message | Result |
@@ -50,7 +58,7 @@ python3.12 -m venv .venv
 Set `DISCORD_BOT_TOKEN` in the environment or an untracked `.env`, then run:
 
 ```sh
-.venv/bin/python ev-calc.py
+.venv/bin/python discord.py
 ```
 
 Enable Message Content Intent for the Discord application. The bot needs View Channel, Send Messages (Send Messages in Threads for threads), and Embed Links. Read Message History enables replies; without it the bot sends a regular channel message. Responses suppress mentions and ignore bots/webhooks. A rejected send is logged without retrying a duplicate.
@@ -61,6 +69,6 @@ Enable Message Content Intent for the Discord application. The bot needs View Ch
 
 Work is isolated on `codex/prediction-markets-hold`, based on `testing` commit `0fc244a`. No production configuration has been changed by this implementation. DigitalOcean's inspected worker used `python ev-calc.py`, tracked master, and retained build `9917467`; the later configuration deployment reused that build. The old repository URL redirects to `jovelgeorge/calculator`; the redirect alone does not establish why autodeploy stopped updating.
 
-Before rollout, use a separate Discord test application/token to verify chat rendering and `/settings`. Startup synchronizes global commands, removing `/ev` for the application whose token is used. Preserve the existing production settings file before replacing the worker: local container files need a separate persistence/backup arrangement to survive replacement. Then reconnect the intended repository/branch in DigitalOcean and verify the actual deployed commit and startup logs. Optional `APP_REVISION` is printed alongside the `probit-pm-v1` startup marker. The worker command stays `python ev-calc.py`.
+Before rollout, use a separate Discord test application/token to verify chat rendering and `/settings`. Startup synchronizes global commands, removing `/ev` for the application whose token is used. Preserve the existing production settings file before replacing the worker: local container files need a separate persistence/backup arrangement to survive replacement. Then reconnect the intended repository/branch in DigitalOcean and verify the actual deployed commit and startup logs. Optional `APP_REVISION` is printed alongside the `probit-pm-v1` startup marker. For this branch, update the worker command to `python discord.py` during rollout.
 
 See [verification notes](docs/verification.md) for acceptance results and intentional historical differences.

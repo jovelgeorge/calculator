@@ -1,4 +1,4 @@
-"""Complete-expression parser and pure probit/EV calculations."""
+"""Input parsing and all odds, devig, prediction-market, EV, and Kelly math."""
 
 from dataclasses import dataclass
 from fractions import Fraction
@@ -6,8 +6,65 @@ import math
 import re
 from statistics import NormalDist
 
-from prediction_market import ContractQuote, parse_cent_price, quote
 
+# Prediction-market prices and exact fees (fixed 100-contract reference model).
+# Integer fee formulation adapted from kalshi-exec/src/kalshi_exec/fees.py.
+PRICE_SCALE = 10_000  # $1; one unit is 0.01 cent
+CONTRACTS = 100
+_CENT_PRICE = re.compile(r"([0-9]{1,2})(?:\.([0-9]{1,2}))?[cC]")
+
+
+def parse_cent_price(token: str) -> int:
+    match = _CENT_PRICE.fullmatch(token.strip())
+    if match is None:
+        raise ValueError("Expected a cent price with at most two decimal places")
+    whole, fractional = match.groups()
+    price = int(whole) * 100 + int((fractional or "").ljust(2, "0"))
+    if not 100 <= price <= 9900:
+        raise ValueError("Cent price must be from 1 through 99")
+    return price
+
+
+def taker_fee_cents(contracts: int, price_cc: int) -> int:
+    if type(contracts) is not int or contracts <= 0:
+        raise ValueError("Contract count must be a positive integer")
+    if type(price_cc) is not int or not 0 < price_cc < PRICE_SCALE:
+        raise ValueError("Price must be strictly between zero and one dollar")
+    numerator = 7 * contracts * price_cc * (PRICE_SCALE - price_cc)
+    denominator = PRICE_SCALE * PRICE_SCALE
+    return (numerator + denominator - 1) // denominator
+
+
+@dataclass(frozen=True)
+class ContractQuote:
+    price_cc: int
+    taker_fee_cents: int
+
+    @property
+    def contracts(self) -> int:
+        return CONTRACTS
+
+    @property
+    def notional_cents(self) -> int:
+        # At exactly 100 contracts, notional cents equals price in centi-cents.
+        return self.price_cc
+
+    @property
+    def maker_decimal(self) -> Fraction:
+        return Fraction(CONTRACTS * 100, self.notional_cents)
+
+    @property
+    def taker_decimal(self) -> Fraction:
+        return Fraction(CONTRACTS * 100, self.notional_cents + self.taker_fee_cents)
+
+
+def quote(price_cc: int) -> ContractQuote:
+    if type(price_cc) is not int or not 100 <= price_cc <= 9900:
+        raise ValueError("Reference price must be from 1 through 99 cents")
+    return ContractQuote(price_cc, taker_fee_cents(CONTRACTS, price_cc))
+
+
+# American odds, probit devigging, and complete-message parsing.
 MAX_MESSAGE_LENGTH = 2000
 MAX_LEGS = 20
 _AMERICAN = re.compile(r"[+-]?[0-9]+")

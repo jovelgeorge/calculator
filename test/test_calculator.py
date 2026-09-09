@@ -7,13 +7,23 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-import discord
 
 from calculator import parse_message, expected_value, kelly_fraction, probit
-from prediction_market import quote, taker_fee_cents
-from presentation import build_embed
-from user_settings import SettingsStore, UserSettings
-from discord_bot import create_bot, handle_message
+from calculator import quote, taker_fee_cents
+
+# discord.py is the executable; `discord` itself names the installed library.
+import importlib.util
+import sys
+spec = importlib.util.spec_from_file_location("calculator_discord", Path(__file__).resolve().parents[1] / "discord.py")
+app = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = app
+spec.loader.exec_module(app)
+discord = app.discord
+build_embed = app.build_embed
+SettingsStore = app.SettingsStore
+UserSettings = app.UserSettings
+create_bot = app.create_bot
+handle_message = app.handle_message
 
 
 class CalculationTests(unittest.TestCase):
@@ -109,7 +119,7 @@ class SettingsTests(unittest.TestCase):
             self.assertTrue(store.get('1').bankroll_enabled)
             self.assertEqual(store.get('1').bankroll, Decimal('1234.56'))
             self.assertEqual(path.read_text(), original)
-            with patch('user_settings.os.replace', side_effect=OSError('disk failure')):
+            with patch('calculator_discord.os.replace', side_effect=OSError('disk failure')):
                 with self.assertRaises(OSError):
                     store.update('1', bankroll=20)
             self.assertEqual(path.read_text(), original)
@@ -156,7 +166,7 @@ class DiscordTests(unittest.IsolatedAsyncioTestCase):
             message = SimpleNamespace(author=SimpleNamespace(bot=False, id=1), webhook_id=None,
                 content='47c', guild=SimpleNamespace(me=object()), channel=channel,
                 reply=AsyncMock(side_effect=discord.Forbidden(response, 'Missing permission')))
-            with self.assertLogs('discord_bot', level='WARNING'):
+            with self.assertLogs('calculator_discord', level='WARNING'):
                 await handle_message(message, store)
             message.reply.assert_awaited_once()
             channel.send.assert_not_awaited()

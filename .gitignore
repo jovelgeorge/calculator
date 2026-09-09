@@ -3,3 +3,7 @@
 ev-calc-lambda/
 .DS_Store
 user_data.json
+__pycache__/
+*.py[cod]
+.settings-*
+env/

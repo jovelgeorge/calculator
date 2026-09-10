@@ -346,6 +346,21 @@ class DiscordTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(activity.type, discord.ActivityType.custom)
             await bot.close()
 
+    async def test_legacy_guild_commands_removed_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = create_bot(SettingsStore(Path(directory) / 'settings.json'))
+            guild = SimpleNamespace(id=123)
+            old = [SimpleNamespace(name=name, type=discord.AppCommandType.chat_input,
+                                   delete=AsyncMock()) for name in ['settings', 'ev', 'other']]
+            with patch.object(bot.tree, 'fetch_commands', new=AsyncMock(return_value=old)) as fetch:
+                await bot.remove_legacy_commands(guild)
+                await bot.remove_legacy_commands(guild)
+                fetch.assert_awaited_once_with(guild=guild)
+            old[0].delete.assert_awaited_once()
+            old[1].delete.assert_awaited_once()
+            old[2].delete.assert_not_awaited()
+            await bot.close()
+
 
 class StartupTests(unittest.TestCase):
     def test_discord_file_runs_directly_despite_library_name_collision(self):

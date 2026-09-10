@@ -239,21 +239,41 @@ class CalculatorBot(commands.Bot):
         intents.message_content = True
         super().__init__(command_prefix="/", intents=intents, allowed_mentions=discord.AllowedMentions.none())
         self.store = store
+        self._checked_command_guilds: set[int] = set()
 
     async def setup_hook(self) -> None:
         # Sync once per connection lifecycle, not on every gateway reconnect.
         # This removes the old global /ev command and obsolete settings option.
-        await self.tree.sync()
-        logger.info("Synced /settings; calculation commands are chat-only")
+        commands = await self.tree.sync()
+        logger.info("Registered global commands: %s", {
+            command.name: [option.name for option in command.options] for command in commands
+        })
+
+    async def remove_legacy_commands(self, guild: discord.Guild) -> None:
+        if guild.id in self._checked_command_guilds:
+            return
+        try:
+            for command in await self.tree.fetch_commands(guild=guild):
+                if command.type == discord.AppCommandType.chat_input and command.name in {"ev", "settings"}:
+                    await command.delete()
+                    logger.info("Removed legacy guild /%s in %s", command.name, guild.id)
+            self._checked_command_guilds.add(guild.id)
+        except discord.HTTPException:
+            logger.exception("Could not clean legacy commands in %s", guild.id)
 
     async def on_ready(self) -> None:
         logger.info("Calculator connected as %s", self.user)
+        for guild in self.guilds:
+            await self.remove_legacy_commands(guild)
         await self.change_presence(
             activity=discord.Activity(
                 name="powered by JOVEL",
                 type=discord.ActivityType.custom,
             )
         )
+
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        await self.remove_legacy_commands(guild)
 
     async def on_message(self, message: discord.Message) -> None:
         try:

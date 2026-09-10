@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -72,7 +73,7 @@ class CalculationTests(unittest.TestCase):
         self.assertEqual(parse_message('-130/0%').probability, Fraction(13, 23))
 
     def test_accepted_grammar(self):
-        for text in ['47c', '97.4C', '1.01c', '99c', '40c:-250/180',
+        for text in ['47c', '47¢', '97.4C', '1.01c', '99c', '40c:-250/180',
                      '40c:-130/4%', '−198:−250/180', '100:AVG(-110,+110)',
                      '100:avg(-110)/avg(110)', '-130/4.5%',
                      '-130,-132', '100,200', '300:avg(-110,-120)/110,-130/4%,120']:
@@ -101,7 +102,7 @@ class CalculationTests(unittest.TestCase):
                      '-130/100%', '-130/-4%', '+2500/4%', '-130/110/200',
                      '100:avg()', '100:avg(100,)', '100:avg(avg(100))',
                      '100:100,', '100:,100', '100:100,,200', '100:(100)',
-                     '100:99', '100:NaN', '40c\n:134', '47c!',
+                     '100:99', '100:NaN', '40c\n:134', '47c!', '35 c',
                      ','.join(['100']*21), '1'*2001]:
             with self.subTest(text=text):
                 self.assertIsNone(parse_message(text))
@@ -109,20 +110,62 @@ class CalculationTests(unittest.TestCase):
     def test_negative_ev_and_output_bound(self):
         result = parse_message('100:200')
         self.assertEqual(expected_value(result.probability, result.offered_decimal), Fraction(-1, 3))
-        self.assertEqual(kelly_fraction(result.probability, result.offered_decimal, Fraction(1, 4)), 0)
+        self.assertEqual(kelly_fraction(result.probability, result.offered_decimal, Fraction(1, 4)), Fraction(-1, 12))
         result = parse_message(','.join(['-250/180'] * 20))
         embed = build_embed(result, UserSettings())
         self.assertTrue(embed is None or len(embed) <= 6000)
 
-    def test_display_and_bankroll(self):
-        rendered = str(build_embed(parse_message('40c:134'), UserSettings(bankroll=Decimal('1000'))).to_dict())
-        for expected in ['+150', '+140', '6.84%', '2.53%', '1.14%', '0.45%', '$1.68', '100 contracts', 'incl. fees']:
+    def test_display_templates_and_extreme_widths(self):
+        embed = build_embed(parse_message('40c:134'), UserSettings())
+        rendered = str(embed.to_dict())
+        for expected in ['Kalshi: 40¢', '+150', '+140', '6.84%', '2.53%', '1.14%', '0.45%', '$1.68', 'contracts']:
             self.assertIn(expected, rendered)
+        for removed in ['WIN:', '100-contract estimate', 'Maker assumes', 'Wager', 'bankroll']:
+            self.assertNotIn(removed, rendered)
+        self.assertIn('\x1b[1;33m', embed.description)
         self.assertIn('-10653', str(build_embed(parse_message('99c'), UserSettings()).to_dict()))
         self.assertIn('+100', str(build_embed(parse_message('100:100'), UserSettings()).to_dict()))
-        standalone = str(build_embed(parse_message('100,200'), UserSettings(bankroll=Decimal('1000'))).to_dict())
+        standalone = build_embed(parse_message('100,200'), UserSettings()).to_dict()
+        self.assertEqual(standalone['title'], 'Fair Odds: +500')
+        standalone = str(standalone)
         self.assertNotIn('EV:', standalone)
         self.assertNotIn('$', standalone)
+
+    def test_approved_compact_templates(self):
+        def plain(description):
+            return re.sub(r'\x1b\[[0-9;]*m', '', description)
+
+        standalone = build_embed(parse_message('35c'), UserSettings())
+        self.assertEqual(standalone.title, 'Kalshi: 35¢')
+        self.assertEqual(plain(standalone.description), (
+            '```ansi\n'
+            'Maker: +186  (no fee)\n'
+            'Taker: +173  (100 contracts)\n'
+            'Fee:   $1.60\n'
+            '```'
+        ))
+
+        comparison = build_embed(parse_message('35c:175'), UserSettings())
+        self.assertEqual(comparison.title, 'Kalshi: 35¢')
+        self.assertEqual(plain(comparison.description), (
+            '```ansi\n'
+            'Maker: +186    EV:  3.90%    QK:  0.52%\n'
+            'Taker: +173    EV: -0.65%    QK: -0.09%\n'
+            '\n'
+            'FV: +175    Fee: $1.60 / 100 contracts\n'
+            '```'
+        ))
+
+        offered = build_embed(parse_message('250:100'), UserSettings())
+        self.assertEqual(offered.title, 'Odds: +250')
+        self.assertEqual(plain(offered.description), (
+            '```ansi\nEV: 75.00%    QK: 7.50%\nFV: +100\n```'
+        ))
+
+        hold = build_embed(parse_message('250/8%'), UserSettings()).to_dict()
+        self.assertNotIn('title', hold)
+        self.assertNotIn('footer', hold)
+        self.assertNotIn('theoretical hold', str(hold))
 
 
 class SettingsTests(unittest.TestCase):
@@ -132,20 +175,20 @@ class SettingsTests(unittest.TestCase):
             path.write_text(json.dumps({'1': {'bankroll': 1234.56, 'kelly': 'HK', 'devig_method': 'power'}}))
             original = path.read_text()
             store = SettingsStore(path)
-            self.assertTrue(store.get('1').bankroll_enabled)
-            self.assertEqual(store.get('1').bankroll, Decimal('1234.56'))
+            self.assertEqual(store.get('1').kelly, 'HK')
             self.assertEqual(path.read_text(), original)
             with patch('calculator_discord.os.replace', side_effect=OSError('disk failure')):
                 with self.assertRaises(OSError):
-                    store.update('1', bankroll=20)
+                    store.update('1', kelly='FK')
             self.assertEqual(path.read_text(), original)
-            self.assertEqual(store.get('1').bankroll, Decimal('1234.56'))
-            store.update('2', bankroll=100)
+            self.assertEqual(store.get('1').kelly, 'HK')
+            store.update('2', kelly='EK')
             self.assertNotIn('devig_method', path.read_text())
+            self.assertNotIn('bankroll', path.read_text())
             self.assertEqual(SettingsStore(path).get('1').kelly, 'HK')
-            for value in [-1, float('inf'), float('nan')]:
+            for value in ['BAD', '', None]:
                 with self.assertRaises(ValueError):
-                    store.update('1', bankroll=value)
+                    store.update('1', kelly=value)
 
 
 class DiscordTests(unittest.IsolatedAsyncioTestCase):
@@ -171,10 +214,10 @@ class DiscordTests(unittest.IsolatedAsyncioTestCase):
         expected_text = {
             '-250/180': ['67.94%', '-212', '+212'],
             '-198:-250/180': ['2.25%', '1.12%', '-198'],
-            '-130/4%': ['54.44%', '-120', 'Opposite estimated'],
+            '-130/4%': ['54.44%', '-120'],
             '47c': ['Kalshi: 47¢', '+113', '+105', '$1.75'],
             '40c:134': ['6.84%', '2.53%', '$1.68'],
-            '300:-250/180,-130/4%,120': ['Leg 1', 'Leg 2', 'Leg 3', 'Independent legs'],
+            '300:-250/180,-130/4%,120': ['Leg 1', 'Leg 2', 'Leg 3', 'WIN:'],
         }
         with tempfile.TemporaryDirectory() as directory:
             store = SettingsStore(Path(directory) / 'settings.json')
@@ -262,7 +305,7 @@ class DiscordTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             bot = create_bot(SettingsStore(Path(directory) / 'settings.json'))
             self.assertEqual([command.name for command in bot.tree.get_commands()], ['settings'])
-            self.assertNotIn('devig_method', [p.name for p in bot.tree.get_commands()[0].parameters])
+            self.assertEqual([p.name for p in bot.tree.get_commands()[0].parameters], ['kelly'])
             await bot.close()
 
     async def test_settings_command_reads_and_updates_preferences(self):
@@ -277,24 +320,17 @@ class DiscordTests(unittest.IsolatedAsyncioTestCase):
                 followup=SimpleNamespace(send=AsyncMock()),
             )
 
-            await command.callback(
-                interaction,
-                bankroll=500.25,
-                toggle_bankroll=False,
-                kelly='HK',
-            )
+            await command.callback(interaction, kelly='HK')
             interaction.response.defer.assert_awaited_once_with(ephemeral=True)
             sent = interaction.followup.send.call_args
-            self.assertIn('Bankroll: $500.25', sent.args[0])
-            self.assertIn('Wager amounts: Disabled', sent.args[0])
-            self.assertIn('Kelly: HK', sent.args[0])
+            self.assertEqual(sent.args[0], 'Kelly: HK')
             self.assertTrue(sent.kwargs['ephemeral'])
             self.assertEqual(SettingsStore(path).get('42').kelly, 'HK')
 
             interaction.response.defer.reset_mock()
             interaction.followup.send.reset_mock()
             await command.callback(interaction)
-            self.assertIn('$500.25', interaction.followup.send.call_args.args[0])
+            self.assertEqual(interaction.followup.send.call_args.args[0], 'Kelly: HK')
             await bot.close()
 
     async def test_startup_hooks_sync_settings_and_restore_custom_status(self):

@@ -11,7 +11,7 @@ from statistics import NormalDist
 # Integer fee formulation adapted from kalshi-exec/src/kalshi_exec/fees.py.
 PRICE_SCALE = 10_000  # $1; one unit is 0.01 cent
 CONTRACTS = 100
-_CENT_PRICE = re.compile(r"([0-9]{1,2})(?:\.([0-9]{1,2}))?[cC]")
+_CENT_PRICE = re.compile(r"([0-9]{1,2})(?:\.([0-9]{1,2}))?[cC¢]")
 
 
 def parse_cent_price(token: str) -> int:
@@ -200,12 +200,12 @@ def parse_message(content: str) -> Calculation | None:
             if text.count(":") != 1:
                 return None
             price, references = text.split(":")
-            if price.strip().endswith(("c", "C")):
+            if price.strip().endswith(("c", "C", "¢")):
                 contract = quote(parse_cent_price(price))
             else:
                 offered = 1 / american_probability(parse_american(price))
         else:
-            if text.endswith(("c", "C")):
+            if text.endswith(("c", "C", "¢")):
                 return Calculation((), contract_quote=quote(parse_cent_price(text)))
             references = text
         legs = tuple(parse_leg(token) for token in split_legs(references))
@@ -227,7 +227,7 @@ def expected_value(probability: Fraction, decimal_payout: Fraction) -> Fraction:
 def kelly_fraction(probability: Fraction, decimal_payout: Fraction, multiplier: Fraction) -> Fraction:
     if not 0 < multiplier <= 1:
         raise ValueError("Invalid Kelly multiplier")
-    return max(Fraction(0), expected_value(probability, decimal_payout) / (decimal_payout - 1) * multiplier)
+    return expected_value(probability, decimal_payout) / (decimal_payout - 1) * multiplier
 
 
 def american_from_decimal(decimal_payout: Fraction) -> Fraction:

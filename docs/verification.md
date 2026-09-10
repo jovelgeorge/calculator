@@ -11,7 +11,7 @@ Offline verification uses Python 3.12 and mocked Discord messages; it does not s
 | `47c` | Maker +113, taker +105, fee $1.75 |
 | `40c:134` | Maker EV 6.84%, QK 1.14%; taker EV 2.53%, QK 0.45%, fee $1.68 |
 
-Tests compare all 9,801 supported price points against an independent Decimal ceiling oracle. They also cover invalid chat inputs, mixed legs, averaging, hold inference, symmetry, exact complementary probabilities, negative-EV Kelly, large displayed odds, settings migration/save failure, reply fallback, and command registration.
+Tests compare all 9,801 supported price points against an independent Decimal ceiling oracle. They also cover invalid chat inputs, mixed legs, averaging, hold inference, symmetry, exact complementary probabilities, signed negative-EV Kelly, large displayed odds, Kelly-only settings migration/save failure, reply fallback, and command registration.
 
 ## Historical comparison
 

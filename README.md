@@ -34,14 +34,6 @@ probit is my selected default devigging method. it is dependency-free and works 
 >
 >for two outcomes, probit computes `z = (phi_inverse(p1) - phi_inverse(p2)) / 2`, then returns `phi(z)` and its complement (already complementary probabilities remain exact)
 
-this allows us to support:
-
-> parlays, fair probability is the product of leg implied probabilities
->
->hold `H`, total implied probability is `1 / (1 - H)`; the missing side is that total minus the supplied probability
->
->decimal payout `d`, EV is `p*d - 1`; full Kelly is `EV/(d-1)`
-
 prediction-markets use a fixed 100-contract model
 
 > price `P` → purchase cost `100*P` and winning payout `$100`
@@ -51,9 +43,5 @@ prediction-markets use a fixed 100-contract model
 > taker fee (kalshi) → `ceil_to_cent(0.07 * 100 * P * (1-P))`
 > 
 > taker fee (polymarket us) → `round_half_even_cent(0.0695 * 100 * P * (1-P))`
->
-> taker fee (novig) → `round_half_up_5dp(c * 100 * P * (1-P))`
->   - c = 0.06 live straights (was 0.03 except NCAAF/MLB/NHL)
->   - c = 0.06 futures, every fill (golf/tennis futures exempt)
 >
 > taker payout → `100 / (purchase_cost + fee)`

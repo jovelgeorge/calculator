@@ -1,6 +1,6 @@
-# devig & EV calculator
+# calculator
 
-open-source discord bot that removes vigourish and calculates kelly & ev for event trading outcomes
+open-source discord calculator bot that removes vigourish and calculates kelly% & expected value for event trading outcomes
 
 ## setup
 
@@ -8,7 +8,7 @@ open-source discord bot that removes vigourish and calculates kelly & ev for eve
 2. create a virtual environment: `python3 -m venv env`
 3. activate the virtual environment: `source env/bin/activate`
 4. install requirements: `pip install -r requirements.txt`
-5. create a `.env` file and add your Discord bot token:
+5. create a `.env` file and add your bot token:
    
 ```
 DISCORD_BOT_TOKEN=your_token_here
@@ -24,11 +24,11 @@ the calculator can be used using the following syntax: `bet_odds:fair_odds`
 - multiple legs, separate by commas: `-130/110, -125/115`
 - market average: `avg(-130, -145)/avg(110,115)`
 - theoretical hold: `-130/4%`
-- fractionals (kalshi make/take): `97.4c`
+- fractionals: `97.4c`
 
 ## under the hood
 
-probit is our default devigging method. it is dependency-free and works brilliantly for overround and underround markets
+probit is my selected default devigging method. it is dependency-free and works great for overround and underround markets
 
 >converts odds to implied probability `p`
 >
@@ -38,16 +38,22 @@ this allows us to support:
 
 > parlays, fair probability is the product of leg implied probabilities
 >
->theoretical hold `H`, total implied probability is `1 / (1 - H)`; the missing side is that total minus the supplied probability
+>hold `H`, total implied probability is `1 / (1 - H)`; the missing side is that total minus the supplied probability
 >
 >decimal payout `d`, EV is `p*d - 1`; full Kelly is `EV/(d-1)`
 
-prediction-markets use a fixed 100-contract model, ours specifically tailored to Kalshi:
+prediction-markets use a fixed 100-contract model
 
 > price `P` → purchase cost `100*P` and winning payout `$100`
 > 
 > maker payout → `100 / purchase_cost`
 > 
-> taker fee → `ceil_to_cent(0.07 * 100 * P * (1-P))`
+> taker fee (kalshi) → `ceil_to_cent(0.07 * 100 * P * (1-P))`
 > 
+> taker fee (polymarket us) → `round_half_even_cent(0.0695 * 100 * P * (1-P))`
+>
+> taker fee (novig) → `round_half_up_5dp(c * 100 * P * (1-P))`
+>   - c = 0.06 live straights (was 0.03 except NCAAF/MLB/NHL)
+>   - c = 0.06 futures, every fill (golf/tennis futures exempt)
+>
 > taker payout → `100 / (purchase_cost + fee)`
